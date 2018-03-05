@@ -7,7 +7,8 @@
 #include <fcntl.h>
 #include "ext2_fs.h"
 
-
+#define BASE_OFFSET 1024  /* location of the super-block in the first group */
+#define BLOCK_OFFSET(block,block_size) (BASE_OFFSET + (block-1)*block_size)
 
 
 
@@ -26,7 +27,7 @@ int main(int argc, char **argv)
 
 	/* SUPERBLOCK */
 	struct ext2_super_block superblock;
-	if (pread(fsfd, &superblock, sizeof(superblock), 1024) != sizeof(superblock)) {
+	if (pread(fsfd, &superblock, sizeof(superblock), BASE_OFFSET) != sizeof(superblock)) {
 		fprintf(stderr, "Error: pread did not read the correct number of bytes\n");
 		exit(2);
 	}
@@ -45,10 +46,10 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Inconsistency detected in number of groups\n");
 		exit(2);
 	}
-	struct ext2_group_desc group;
+	struct ext2_group_desc group[numberOfGroups];
 	int g2 = 0;					//groupNumber
 	for (g2 = 0; g2 < numberOfGroups; g2++) {
-		if (pread(fsfd, &group, sizeof(group), 1024 + sizeof(superblock) + g2*sizeof(group)) != sizeof(group)) {
+		if (pread(fsfd, &group[g2], sizeof(struct ext2_group_desc), BASE_OFFSET + sizeof(superblock) + g2 * sb4 * sb6) != sizeof(struct ext2_group_desc)) {
 			fprintf(stderr, "Error: pread did not read the correct number of bytes\n");
 			exit(2);
 		}
@@ -60,12 +61,62 @@ int main(int argc, char **argv)
 			if (sb3%sb7 != 0)
 				g4 = sb3%sb7;
 		}
-		int g5 = group.bg_free_blocks_count;			//numberOfFreeBlocks;
-		int g6 = group.bg_free_inodes_count;			//numberOfFreeInodes;
-		int g7 = group.bg_block_bitmap;			
-		int g8 = group.bg_inode_bitmap;			
-		int g9 = group.bg_inode_table;							//groupFirstFreeInode;
+		int g5 = group[g2].bg_free_blocks_count;			//numberOfFreeBlocks;
+		int g6 = group[g2].bg_free_inodes_count;			//numberOfFreeInodes;
+		int g7 = group[g2].bg_block_bitmap;			
+		int g8 = group[g2].bg_inode_bitmap;			
+		int g9 = group[g2].bg_inode_table;							//groupFirstFreeInode;
 		printf("GROUP,%i,%i,%i,%i,%i,%i,%i,%i\n", g2, g3, g4, g5, g6, g7, g8, g9);
+	}
+
+	/* FREE BLOCK ENTRIES */
+	int i, j, k;
+	for (i = 0; i < numberOfGroups; i++) {
+		int blockBitMap = group[i].bg_block_bitmap;
+		int numberOfBlocks = sb6;
+		if (i == numberOfGroups - 1)
+			if (sb2%sb6 != 0)
+				numberOfBlocks = sb2%sb6;
+		for (j = 0; j < numberOfBlocks/8; j++) {
+			unsigned char buff;
+			if (pread(fsfd, &buff, 1, BLOCK_OFFSET(blockBitMap, sb4) + j) != 1) {
+				fprintf(stderr, "Error: pread did not read the correct number of bytes\n");
+                        	exit(2);
+                	}
+			unsigned char mask = 0x01;
+			for (k = 0; k < 8; k++) {
+				int freeBlockNumber = 1 + i*sb6  + j*8 + k;	// 1 because block counts start at 1, not 0
+				if (freeBlockNumber > numberOfBlocks + i*sb6)
+					break;
+				if ((buff & (mask << k)) == 0)			// when k = 0 shift 0x01 by 7 is 0x80
+					printf("BFREE,%i\n",freeBlockNumber);
+			}
+		}
+	}
+
+	/* FREE INODE ENTRIES */
+	for (i = 0; i < numberOfGroups; i++) {
+		int inodeBitMap = group[i].bg_inode_bitmap;
+		int numberOfInodes = sb7;
+		if (i == numberOfGroups - 1) {
+			if (sb3%sb7 != 0)
+				numberOfInodes = sb3%sb7;
+		}
+		for (j = 0; j < numberOfInodes/8; j++) {
+			unsigned char buff;
+			if (pread(fsfd, &buff, 1, BLOCK_OFFSET(inodeBitMap, sb4) + j) != 1) {
+				fprintf(stderr, "Error: pread did not read the correct number of bytes\n");
+				exit(2);
+			}
+			unsigned char mask = 0x01;
+			for (k = 0; k < 8; k++) {
+				int freeInodeNumber = 1 + i*sb7 + j*8 + k;
+				if (freeInodeNumber > numberOfInodes + i*sb7)
+					break;
+				if ((buff & (mask << k)) == 0)
+					printf("IFREE,%i\n",freeInodeNumber);
+			}
+		}
 	}
 	return 0;
 }
