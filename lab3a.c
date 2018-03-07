@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 //#include <sys/types.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include "ext2_fs.h"
@@ -12,6 +13,11 @@
 
 
 
+void timeStr(uint32_t time, char* buf) {
+	time_t t = time;
+	struct tm stamp = *gmtime(&t);
+	strftime(buf, 80, "%m/%d/%y %H:%M:%S", &stamp);
+}
 int main(int argc, char **argv) 
 {
 	if (argc != 2) {
@@ -115,6 +121,39 @@ int main(int argc, char **argv)
 					break;
 				if ((buff & (mask << k)) == 0)
 					printf("IFREE,%i\n",freeInodeNumber);
+			}
+		}
+	}
+
+	/* INODE SUMMARY */
+	struct ext2_inode curInode;
+	char ftype='?';
+	for(int i=0; i< numberOfGroups; i++)
+	{
+		int offset=BASE_OFFSET + 4*sb4;
+		for(int j=0; j<(int)superblock.s_inodes_per_group;j++)
+		{
+			pread(fsfd, &curInode, sizeof(struct ext2_inode), offset + j*sizeof(struct ext2_inode));
+			if(curInode.i_mode != 0 && curInode.i_links_count != 0)
+			{
+				if(curInode.i_mode & 0x4000)
+					ftype='d';
+				else if(curInode.i_mode & 0x8000)
+					ftype='f';
+				else if(curInode.i_mode & 0xA000)
+					ftype='s';
+				
+				char ctime[20], mtime[20], atime[20];
+				timeStr(curInode.i_ctime, ctime);
+                timeStr(curInode.i_mtime, mtime);
+                timeStr(curInode.i_atime, atime);
+
+				printf("INODE,%d,%c,%o,%d,%d,%d,%s,%s,%s,%d,%d",j+1,ftype,curInode.i_mode & 0xFFF,curInode.i_uid,curInode.i_gid,curInode.i_links_count
+						,ctime,mtime,atime,curInode.i_size,curInode.i_blocks);
+				for(int k=0;k<EXT2_N_BLOCKS;k++){
+					printf("%d,",curInode.i_block[k]);
+				}
+				printf("\n");
 			}
 		}
 	}
