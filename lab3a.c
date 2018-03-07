@@ -154,6 +154,57 @@ int main(int argc, char **argv)
 					printf("%d,",curInode.i_block[k]);
 				}
 				printf("\n");
+
+				if(ftype=='d'){
+					struct ext2_dir_entry dir;
+					for(int k=0;k<EXT2_NDIR_BLOCKS;k++)
+					{
+						if(curInode.i_block[k]==0) 
+							break;
+                        int dirOffset = 0;
+                        while (dirOffset < sb4) {
+                            pread(fsfd, &dir, sizeof(struct ext2_dir_entry), curInode.i_block[k]*sb4 + dirOffset);
+							if(dir.inode==0){
+								dirOffset += dir.rec_len;
+								continue;
+							}
+							printf("DIRENT,%d,%d,%d,%d,%d,'%s'\n", j+1, dirOffset, dir.inode,
+            						dir.rec_len, dir.name_len, dir.name);
+                            dirOffset += dir.rec_len;
+                        }
+					}
+				}
+				int* singleIndirect = malloc(sb4);
+				int* doubleIndirect = malloc(sb4);
+				int* tripleIndirect = malloc(sb4);
+				struct ext2_dir_entry indir;
+				if(curInode.i_block[12] != 0)
+				{
+					pread(fsfd, singleIndirect, sb4, curInode.i_block[12]*sb4);
+					for(int k=0;k<sb4/4;k++)
+					{
+						if(singleIndirect[k]==0)
+							break;
+						int indirOffset = 0;
+                        while (indirOffset < sb4) {
+                            pread(fsfd, &indir, sizeof(struct ext2_dir_entry), singleIndirect[k]*sb4 + indirOffset);
+							if(indir.inode==0){
+								indirOffset += indir.rec_len;
+								continue;
+							}
+							printf("INDIRECT,%d,%d,%d,%d,%d\n", j+1, 1, indirOffset, curInode.i_block[12], k+1);
+                            indirOffset += indir.rec_len;
+                        }
+					}
+				}
+				if(curInode.i_block[13]!=0)
+				{
+
+				}
+				if(curInode.i_block[14]!=0)
+				{
+
+				}
 			}
 		}
 	}
