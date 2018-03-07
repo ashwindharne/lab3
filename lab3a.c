@@ -1,7 +1,11 @@
+//NAME: Ashwin Dharne
+//EMAIL: ashwindharne@gmail.com
+//UID: 004807188
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdint.h>
 //#include <sys/types.h>
 #include <time.h>
 #include <sys/stat.h>
@@ -11,21 +15,43 @@
 #define BASE_OFFSET 1024  /* location of the super-block in the first group */
 #define BLOCK_OFFSET(block,block_size) (BASE_OFFSET + (block-1)*block_size)
 
-
-
+int sb4;
+int fsfd;
+void indirect_recursive(int inode_number, uint32_t block_number, int lvl, uint32_t offset)
+{
+	uint32_t addrPtr[sb4/(int)sizeof(uint32_t)];
+	pread(fsfd, addrPtr, sb4, BLOCK_OFFSET(block_number, sb4));
+	for(int i=0;i<sb4/(int)sizeof(uint32_t);i++)
+	{
+		if(addrPtr[i]!=0){
+			printf("INDIRECT,%d,%d,%d,%d,%d\n",inode_number, lvl, offset, block_number, addrPtr[i]);
+			if(lvl==2){
+				indirect_recursive(inode_number, addrPtr[i], lvl-1, offset);
+				continue;
+			}
+			else if(lvl==3){
+				indirect_recursive(inode_number, addrPtr[i],lvl-1,offset);
+				continue;
+			}
+		}
+		if(lvl==1)
+			offset++;
+	}
+}
 void timeStr(uint32_t time, char* buf) {
 	time_t t = time;
 	struct tm stamp = *gmtime(&t);
 	strftime(buf, 80, "%m/%d/%y %H:%M:%S", &stamp);
 }
-int main(int argc, char **argv) 
+
+int main(int argc, char **argv)
 {
 	if (argc != 2) {
 		fprintf(stderr, "Error: pass in only one argument\n");
 		exit(1);
 	}
 	char* fs = argv[1];				// file system
-	int fsfd = open(fs, O_RDONLY); 			// file system file descriptor
+	fsfd = open(fs, O_RDONLY); 			// file system file descriptor
 	if (fsfd == -1) {
 		fprintf(stderr, "Error: failed to open %s\n", fs);
 		exit(2);
@@ -39,7 +65,7 @@ int main(int argc, char **argv)
 	}
 	int sb2 = superblock.s_blocks_count;		//numberOfBlocks
 	int sb3 = superblock.s_inodes_count;		//numberOfInodes
-	int sb4 = EXT2_MIN_BLOCK_SIZE << superblock.s_log_block_size;//blockSize
+	sb4 = EXT2_MIN_BLOCK_SIZE << superblock.s_log_block_size;//blockSize
 	int sb5 = superblock.s_inode_size;		//inodeSize
 	int sb6 = superblock.s_blocks_per_group;	//blocksPerGroup
 	int sb7 = superblock.s_inodes_per_group;	//inodesPerGroup
@@ -69,8 +95,8 @@ int main(int argc, char **argv)
 		}
 		int g5 = group[g2].bg_free_blocks_count;			//numberOfFreeBlocks;
 		int g6 = group[g2].bg_free_inodes_count;			//numberOfFreeInodes;
-		int g7 = group[g2].bg_block_bitmap;			
-		int g8 = group[g2].bg_inode_bitmap;			
+		int g7 = group[g2].bg_block_bitmap;
+		int g8 = group[g2].bg_inode_bitmap;
 		int g9 = group[g2].bg_inode_table;							//groupFirstFreeInode;
 		printf("GROUP,%i,%i,%i,%i,%i,%i,%i,%i\n", g2, g3, g4, g5, g6, g7, g8, g9);
 	}
@@ -142,7 +168,7 @@ int main(int argc, char **argv)
 					ftype='f';
 				else if(curInode.i_mode & 0xA000)
 					ftype='s';
-				
+
 				char ctime[20], mtime[20], atime[20];
 				timeStr(curInode.i_ctime, ctime);
                 timeStr(curInode.i_mtime, mtime);
@@ -151,7 +177,7 @@ int main(int argc, char **argv)
 				printf("INODE,%d,%c,%o,%d,%d,%d,%s,%s,%s,%d,%d",j+1,ftype,curInode.i_mode & 0xFFF,curInode.i_uid,curInode.i_gid,curInode.i_links_count
 						,ctime,mtime,atime,curInode.i_size,curInode.i_blocks);
 				for(int k=0;k<EXT2_N_BLOCKS;k++){
-					printf("%d,",curInode.i_block[k]);
+					printf(",%d",curInode.i_block[k]);
 				}
 				printf("\n");
 
@@ -159,7 +185,7 @@ int main(int argc, char **argv)
 					struct ext2_dir_entry dir;
 					for(int k=0;k<EXT2_NDIR_BLOCKS;k++)
 					{
-						if(curInode.i_block[k]==0) 
+						if(curInode.i_block[k]==0)
 							break;
                         int dirOffset = 0;
                         while (dirOffset < sb4) {
@@ -174,36 +200,14 @@ int main(int argc, char **argv)
                         }
 					}
 				}
-				int* singleIndirect = malloc(sb4);
-				int* doubleIndirect = malloc(sb4);
-				int* tripleIndirect = malloc(sb4);
-				struct ext2_dir_entry indir;
-				if(curInode.i_block[12] != 0)
-				{
-					pread(fsfd, singleIndirect, sb4, curInode.i_block[12]*sb4);
-					for(int k=0;k<sb4/4;k++)
-					{
-						if(singleIndirect[k]==0)
-							break;
-						int indirOffset = 0;
-                        while (indirOffset < sb4) {
-                            pread(fsfd, &indir, sizeof(struct ext2_dir_entry), singleIndirect[k]*sb4 + indirOffset);
-							if(indir.inode==0){
-								indirOffset += indir.rec_len;
-								continue;
-							}
-							printf("INDIRECT,%d,%d,%d,%d,%d\n", j+1, 1, indirOffset, curInode.i_block[12], k+1);
-                            indirOffset += indir.rec_len;
-                        }
-					}
+				if(curInode.i_block[12]!=0){
+					indirect_recursive(j+1, curInode.i_block[12],1,12);
 				}
-				if(curInode.i_block[13]!=0)
-				{
-
+				if(curInode.i_block[13]!= 0){
+					indirect_recursive(j+1,curInode.i_block[13],2,268);
 				}
-				if(curInode.i_block[14]!=0)
-				{
-
+				if(curInode.i_block[14]!=0){
+					indirect_recursive(j+1,curInode.i_block[14],3,65804);
 				}
 			}
 		}
