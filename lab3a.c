@@ -17,7 +17,7 @@
 
 int sb4;
 int fsfd;
-void indirect_recursive(int inode_number, uint32_t block_number, int lvl, uint32_t offset)
+void indirect_recursive(int inode_number, uint32_t block_number, uint32_t offset, int lvl)
 {
 	uint32_t addrPtr[sb4/(int)sizeof(uint32_t)];
 	pread(fsfd, addrPtr, sb4, BLOCK_OFFSET(block_number, sb4));
@@ -26,11 +26,11 @@ void indirect_recursive(int inode_number, uint32_t block_number, int lvl, uint32
 		if(addrPtr[i]!=0){
 			printf("INDIRECT,%d,%d,%d,%d,%d\n",inode_number, lvl, offset, block_number, addrPtr[i]);
 			if(lvl==2){
-				indirect_recursive(inode_number, addrPtr[i], lvl-1, offset);
+				indirect_recursive(inode_number, addrPtr[i],offset, lvl-1);
 				continue;
 			}
 			else if(lvl==3){
-				indirect_recursive(inode_number, addrPtr[i],lvl-1,offset);
+				indirect_recursive(inode_number, addrPtr[i],offset,lvl-1);
 				continue;
 			}
 		}
@@ -181,6 +181,7 @@ int main(int argc, char **argv)
 				}
 				printf("\n");
 
+				/* DIRECTORY */
 				if(ftype=='d'){
 					struct ext2_dir_entry dir;
 					for(int k=0;k<EXT2_NDIR_BLOCKS;k++)
@@ -200,14 +201,18 @@ int main(int argc, char **argv)
                         }
 					}
 				}
+				/*INDIRECT*/
+				//because the first 12 are used
 				if(curInode.i_block[12]!=0){
-					indirect_recursive(j+1, curInode.i_block[12],1,12);
+					indirect_recursive(j+1, curInode.i_block[12],12,1);
 				}
+				//first 268 used by first indirect
 				if(curInode.i_block[13]!= 0){
-					indirect_recursive(j+1,curInode.i_block[13],2,268);
+					indirect_recursive(j+1,curInode.i_block[13],268,2);
 				}
+				//first 65804 used by second indirect
 				if(curInode.i_block[14]!=0){
-					indirect_recursive(j+1,curInode.i_block[14],3,65804);
+					indirect_recursive(j+1,curInode.i_block[14],65804,3);
 				}
 			}
 		}
